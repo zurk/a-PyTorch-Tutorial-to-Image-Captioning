@@ -1,3 +1,5 @@
+import json
+import os
 import time
 import torch.backends.cudnn as cudnn
 import torch.optim
@@ -5,14 +7,21 @@ import torch.utils.data
 import torchvision.transforms as transforms
 from torch import nn
 from torch.nn.utils.rnn import pack_padded_sequence
-from models import Encoder, DecoderWithAttention
-from datasets import *
-from utils import *
+
+from datasets import CaptionDataset
+from image_captioning.create_input_file_for_svhn import output_folder
+from image_captioning.models import Encoder, DecoderWithAttention
+from image_captioning.utils import adjust_learning_rate, AverageMeter, clip_gradient, accuracy, \
+    save_checkpoint
 from nltk.translate.bleu_score import corpus_bleu
 
+MAX_NO_IMPROVEMENT = 5
+NO_IMPROVEMENT_ADJUST_RATE = 3
+TOP_K_ACCURACY = 1
+
 # Data parameters
-data_folder = '/media/ssd/caption data'  # folder with data files saved by create_input_files.py
-data_name = 'coco_5_cap_per_img_5_min_word_freq'  # base name shared by data files
+data_folder = str(output_folder)  # folder with data files saved by create_input_files.py
+data_name = 'svhn_5_cap_per_img_5_min_word_freq'  # base name shared by data files
 
 # Model parameters
 emb_dim = 512  # dimension of word embeddings
@@ -99,9 +108,10 @@ def main():
     for epoch in range(start_epoch, epochs):
 
         # Decay learning rate if there is no improvement for 8 consecutive epochs, and terminate training after 20
-        if epochs_since_improvement == 20:
+        if epochs_since_improvement == MAX_NO_IMPROVEMENT:
             break
-        if epochs_since_improvement > 0 and epochs_since_improvement % 8 == 0:
+        if (epochs_since_improvement > 0 and
+                epochs_since_improvement % NO_IMPROVEMENT_ADJUST_RATE == 0):
             adjust_learning_rate(decoder_optimizer, 0.8)
             if fine_tune_encoder:
                 adjust_learning_rate(encoder_optimizer, 0.8)
@@ -154,7 +164,7 @@ def train(train_loader, encoder, decoder, criterion, encoder_optimizer, decoder_
     batch_time = AverageMeter()  # forward prop. + back prop. time
     data_time = AverageMeter()  # data loading time
     losses = AverageMeter()  # loss (per word decoded)
-    top5accs = AverageMeter()  # top5 accuracy
+    topk_accs = AverageMeter()  # topk accuracy
 
     start = time.time()
 
@@ -203,9 +213,9 @@ def train(train_loader, encoder, decoder, criterion, encoder_optimizer, decoder_
             encoder_optimizer.step()
 
         # Keep track of metrics
-        top5 = accuracy(scores, targets, 5)
+        topk = accuracy(scores, targets, TOP_K_ACCURACY)
         losses.update(loss.item(), sum(decode_lengths))
-        top5accs.update(top5, sum(decode_lengths))
+        topk_accs.update(topk, sum(decode_lengths))
         batch_time.update(time.time() - start)
 
         start = time.time()
@@ -216,10 +226,9 @@ def train(train_loader, encoder, decoder, criterion, encoder_optimizer, decoder_
                   'Batch Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                   'Data Load Time {data_time.val:.3f} ({data_time.avg:.3f})\t'
                   'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                  'Top-5 Accuracy {top5.val:.3f} ({top5.avg:.3f})'.format(epoch, i, len(train_loader),
-                                                                          batch_time=batch_time,
-                                                                          data_time=data_time, loss=losses,
-                                                                          top5=top5accs))
+                  'Top-{k} Accuracy {topk.val:.3f} ({topk.avg:.3f})'.format(
+                epoch, i, len(train_loader), batch_time=batch_time, data_time=data_time,
+                loss=losses, topk=topk_accs, k=TOP_K_ACCURACY))
 
 
 def validate(val_loader, encoder, decoder, criterion):
@@ -238,7 +247,7 @@ def validate(val_loader, encoder, decoder, criterion):
 
     batch_time = AverageMeter()
     losses = AverageMeter()
-    top5accs = AverageMeter()
+    topkaccs = AverageMeter()
 
     start = time.time()
 
@@ -278,8 +287,8 @@ def validate(val_loader, encoder, decoder, criterion):
 
             # Keep track of metrics
             losses.update(loss.item(), sum(decode_lengths))
-            top5 = accuracy(scores, targets, 5)
-            top5accs.update(top5, sum(decode_lengths))
+            topk = accuracy(scores, targets, TOP_K_ACCURACY)
+            topkaccs.update(topk, sum(decode_lengths))
             batch_time.update(time.time() - start)
 
             start = time.time()
@@ -288,8 +297,9 @@ def validate(val_loader, encoder, decoder, criterion):
                 print('Validation: [{0}/{1}]\t'
                       'Batch Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                       'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                      'Top-5 Accuracy {top5.val:.3f} ({top5.avg:.3f})\t'.format(i, len(val_loader), batch_time=batch_time,
-                                                                                loss=losses, top5=top5accs))
+                      'Top-{k} Accuracy {topk.val:.3f} ({topk.avg:.3f})\t'.format(
+                    i, len(val_loader), batch_time=batch_time, loss=losses, topk=topkaccs,
+                    k=TOP_K_ACCURACY))
 
             # Store references (true captions), and hypothesis (prediction) for each image
             # If for n images, we have n hypotheses, and references a, b, c... for each image, we need -
@@ -319,10 +329,11 @@ def validate(val_loader, encoder, decoder, criterion):
         bleu4 = corpus_bleu(references, hypotheses)
 
         print(
-            '\n * LOSS - {loss.avg:.3f}, TOP-5 ACCURACY - {top5.avg:.3f}, BLEU-4 - {bleu}\n'.format(
+            '\n * LOSS - {loss.avg:.3f}, TOP-{k} ACCURACY - {topk.avg:.3f}, BLEU-4 - {bleu}\n'.format(
                 loss=losses,
-                top5=top5accs,
-                bleu=bleu4))
+                topk=topkaccs,
+                bleu=bleu4,
+                k=TOP_K_ACCURACY))
 
     return bleu4
 
