@@ -1,19 +1,25 @@
+import json
+import os
+
 import torch.backends.cudnn as cudnn
 import torch.optim
 import torch.utils.data
 import torchvision.transforms as transforms
-from datasets import *
-from utils import *
 from nltk.translate.bleu_score import corpus_bleu
 import torch.nn.functional as F
 from tqdm import tqdm
 
+from datasets import CaptionDataset
+from image_captioning.create_input_file_for_svhn import output_folder
+
+FORCE_BREAK = 10
+
 # Parameters
-data_folder = '/media/ssd/caption data'  # folder with data files saved by create_input_files.py
-data_name = 'coco_5_cap_per_img_5_min_word_freq'  # base name shared by data files
-checkpoint = '../BEST_checkpoint_coco_5_cap_per_img_5_min_word_freq.pth.tar'  # model checkpoint
-word_map_file = '/media/ssd/caption data/WORDMAP_coco_5_cap_per_img_5_min_word_freq.json'  # word map, ensure it's the same the data was encoded with and the model was trained with
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")  # sets device for model and PyTorch tensors
+data_folder = str(output_folder)  # folder with data files saved by create_input_files.py
+data_name = 'svhn_5_cap_per_img_5_min_word_freq'  # base name shared by data files
+checkpoint = './BEST_checkpoint_svhn_5_cap_per_img_5_min_word_freq.pth.tar'  # model checkpoint
+word_map_file = os.path.join(data_folder, 'WORDMAP_svhn_5_cap_per_img_5_min_word_freq.json')  # word map, ensure it's the same the data was encoded with and the model was trained with
+device = "cpu" #torch.device("cuda" if torch.cuda.is_available() else "cpu")  # sets device for model and PyTorch tensors
 cudnn.benchmark = True  # set to true only if inputs to model are fixed size; otherwise lot of computational overhead
 
 # Load model
@@ -35,6 +41,7 @@ vocab_size = len(word_map)
 normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                  std=[0.229, 0.224, 0.225])
 
+special_chars = frozenset((word_map['<start>'], word_map['<end>'], word_map['<pad>']))
 
 def evaluate(beam_size):
     """
@@ -56,10 +63,11 @@ def evaluate(beam_size):
     # references = [[ref1a, ref1b, ref1c], [ref2a, ref2b], ...], hypotheses = [hyp1, hyp2, ...]
     references = list()
     hypotheses = list()
+    correct = 0  # Number of correct captions
 
     # For each image
-    for i, (image, caps, caplens, allcaps) in enumerate(
-            tqdm(loader, desc="EVALUATING AT BEAM SIZE " + str(beam_size))):
+    for index, (image, caps, caplens, allcaps) in enumerate(
+            tqdm(loader, desc="EVALUATING AT BEAM SIZE " + str(beam_size)), start=1):
 
         k = beam_size
 
@@ -149,7 +157,7 @@ def evaluate(beam_size):
             k_prev_words = next_word_inds[incomplete_inds].unsqueeze(1)
 
             # Break if things have been going on too long
-            if step > 50:
+            if step > FORCE_BREAK:
                 break
             step += 1
 
@@ -157,23 +165,26 @@ def evaluate(beam_size):
         seq = complete_seqs[i]
 
         # References
-        img_caps = allcaps[0].tolist()
-        img_captions = list(
-            map(lambda c: [w for w in c if w not in {word_map['<start>'], word_map['<end>'], word_map['<pad>']}],
-                img_caps))  # remove <start> and pads
-        references.append(img_captions)
+        img_caps = allcaps[0].tolist()[0]  # We expect only one caption.
+        # Should be fixed in data preparation.
+        img_caption = [w for w in img_caps if w not in special_chars]  # remove <start> and pads
+        references.append(img_caption)
 
         # Hypotheses
-        hypotheses.append([w for w in seq if w not in {word_map['<start>'], word_map['<end>'], word_map['<pad>']}])
+        hypothesis = [w for w in seq if w not in special_chars]
+        hypotheses.append(hypothesis)
 
         assert len(references) == len(hypotheses)
 
-    # Calculate BLEU-4 scores
-    bleu4 = corpus_bleu(references, hypotheses)
+        if img_caption == hypothesis:
+            correct += 1
 
-    return bleu4
+        if index % 100 == 0:
+            print("\nAccuracy is %.3f" % (correct / index))
+
+    return correct / index
 
 
 if __name__ == '__main__':
     beam_size = 1
-    print("\nBLEU-4 score @ beam size of %d is %.4f." % (beam_size, evaluate(beam_size)))
+    print("\nAccuracy score is %.4f." % evaluate(beam_size))

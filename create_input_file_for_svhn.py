@@ -57,6 +57,7 @@ def create_dataset_json_description(input_dir_train, input_dir_test, dataset_jso
     with open(str(dataset_json), "w") as f:
         json.dump(data, f, indent=2)
 
+
 if __name__ == '__main__':
     create_dataset_json_description(input_dir_train, input_dir_test, dataset_json)
     # Create input files (along with word map)
