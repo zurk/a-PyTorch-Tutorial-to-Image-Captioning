@@ -23,7 +23,7 @@ def create_input_files(dataset, karpathy_json_path, image_folder, captions_per_i
     :param max_len: don't sample captions longer than this length
     """
 
-    assert dataset in {'coco', 'flickr8k', 'flickr30k'}
+    assert dataset in {'svhn', 'coco', 'flickr8k', 'flickr30k'}
 
     # Read Karpathy JSON
     with open(karpathy_json_path, 'r') as j:
@@ -49,8 +49,9 @@ def create_input_files(dataset, karpathy_json_path, image_folder, captions_per_i
         if len(captions) == 0:
             continue
 
-        path = os.path.join(image_folder, img['filepath'], img['filename']) if dataset == 'coco' else os.path.join(
-            image_folder, img['filename'])
+        path = os.path.join(image_folder, img['filepath'], img['filename']) \
+            if dataset in {'coco', 'svhn'} \
+            else os.path.join(image_folder, img['filename'])
 
         if img['split'] in {'train', 'restval'}:
             train_image_paths.append(path)
@@ -70,6 +71,8 @@ def create_input_files(dataset, karpathy_json_path, image_folder, captions_per_i
     # Create word map
     words = [w for w in word_freq.keys() if word_freq[w] > min_word_freq]
     word_map = {k: v + 1 for v, k in enumerate(words)}
+    if dataset == 'svhn':
+        word_map[' '] = len(word_map) + 1
     word_map['<unk>'] = len(word_map) + 1
     word_map['<start>'] = len(word_map) + 1
     word_map['<end>'] = len(word_map) + 1
