@@ -1,3 +1,13 @@
+This is a fork of amazing **[PyTorch](https://pytorch.org) Tutorial to Image Captioning**.
+Original repository can be found [here](https://github.com/sgrvinod/a-PyTorch-Tutorial-to-Image-Captioning).
+
+# Why I need fork
+I decided to apply image captioning approach to recognize digits and numbers in natural scene images. 
+I use [SVHN dataset](http://ufldl.stanford.edu/housenumbers/) to train the model. 
+It is unusual approach for such data that is why I am not going to merge changes to original repository for now. 
+
+#Original *README.md*
+
 This is a **[PyTorch](https://pytorch.org) Tutorial to Image Captioning**.
 
 This is the first in [a series of tutorials](https://github.com/sgrvinod/Deep-Tutorials-for-PyTorch) I'm writing about _implementing_ cool models on your own with the amazing PyTorch library.
