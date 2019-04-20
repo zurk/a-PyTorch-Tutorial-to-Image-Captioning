@@ -50,6 +50,7 @@ def create_input_files(dataset, karpathy_json_path, image_folder, captions_per_i
         path = os.path.join(image_folder, img['filepath'], img['filename']) \
             if dataset not in {'flickr8k', 'flickr30k'} \
             else os.path.join(image_folder, img['filename'])
+        path = path.encode()
 
         if img['split'] in {'train', 'restval'}:
             train_image_paths.append(path)
@@ -101,6 +102,7 @@ def create_input_files(dataset, karpathy_json_path, image_folder, captions_per_i
 
             # Create dataset inside HDF5 file to store images
             images = h.create_dataset('images', (len(impaths), 3, 256, 256), dtype='uint8')
+            h.create_dataset('paths', data=impaths)
 
             print("\nReading %s images and captions, storing to file...\n" % split)
 
