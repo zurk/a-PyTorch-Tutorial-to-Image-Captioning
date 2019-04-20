@@ -160,14 +160,19 @@ def visualize_att(image_path, seq, alphas, rev_word_map, smooth=True):
     :param smooth: smooth weights?
     """
     image = Image.open(image_path)
-    image = image.resize([14 * 24, 14 * 24], Image.LANCZOS)
-
     words = [rev_word_map[ind] for ind in seq]
+
+    plt.figure(figsize=(12, 2), dpi=120)
+    plt.subplot(np.ceil((len(words) + 1) / 6.), 6, 1)
+    plt.title('...%s' % (image_path[-20:-3]), color='black', backgroundcolor='white', fontsize=8)
+    plt.imshow(image)
+
+    image = image.resize([14 * 24, 14 * 24], Image.LANCZOS)
 
     for t in range(len(words)):
         if t > 50:
             break
-        plt.subplot(np.ceil(len(words) / 5.), 5, t + 1)
+        plt.subplot(np.ceil((len(words) + 1) / 6.), 6, t + 2)
 
         plt.text(0, 1, '%s' % (words[t]), color='black', backgroundcolor='white', fontsize=12)
         plt.imshow(image)
@@ -179,9 +184,10 @@ def visualize_att(image_path, seq, alphas, rev_word_map, smooth=True):
         if t == 0:
             plt.imshow(alpha, alpha=0)
         else:
-            plt.imshow(alpha, alpha=0.8)
+            plt.imshow(alpha, alpha=0.6)
         plt.set_cmap(cm.Greys_r)
         plt.axis('off')
+    plt.subplots_adjust(left=0, bottom=0, right=1, top=1, wspace=0, hspace=0)
     plt.show()
 
 
