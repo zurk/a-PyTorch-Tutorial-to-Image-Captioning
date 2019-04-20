@@ -8,8 +8,9 @@ import torchvision.transforms as transforms
 from torch import nn
 from torch.nn.utils.rnn import pack_padded_sequence
 
-from datasets import CaptionDataset
+from image_captioning.constants import DIGIT_WORD_MAP_PATH
 from image_captioning.create_input_file_for_svhn import output_folder
+from image_captioning.datasets import CaptionDataset
 from image_captioning.models import Encoder, DecoderWithAttention
 from image_captioning.utils import adjust_learning_rate, AverageMeter, clip_gradient, accuracy, \
     save_checkpoint
@@ -21,7 +22,7 @@ TOP_K_ACCURACY = 1
 
 # Data parameters
 data_folder = str(output_folder)  # folder with data files saved by create_input_files.py
-data_name = 'svhn_5_cap_per_img_5_min_word_freq'  # base name shared by data files
+data_name = 'svhn_1_cap_per_img_5_min_word_freq'  # base name shared by data files
 
 # Model parameters
 emb_dim = 512  # dimension of word embeddings
@@ -44,11 +45,11 @@ grad_clip = 5.  # clip gradients at an absolute value of
 alpha_c = 1.  # regularization parameter for 'doubly stochastic attention', as in the paper
 best_bleu4 = 0.  # BLEU-4 score right now
 print_freq = 100  # print training/validation stats every __ batches
-fine_tune_encoder = True  # fine-tune encoder?
-checkpoint = "checkpoint_svhn_5_cap_per_img_5_min_word_freq.pth.tar"  # path to checkpoint, None if none
+fine_tune_encoder = False  # fine-tune encoder?
+checkpoint = None # path to checkpoint, None if none
 
 
-def main():
+def main(word_map_file=None):
     """
     Training and validation.
     """
@@ -56,7 +57,8 @@ def main():
     global best_bleu4, epochs_since_improvement, checkpoint, start_epoch, fine_tune_encoder, data_name, word_map
 
     # Read word map
-    word_map_file = os.path.join(data_folder, 'WORDMAP_' + data_name + '.json')
+    if word_map_file is None:
+        word_map_file = os.path.join(data_folder, 'WORDMAP_' + data_name + '.json')
     with open(word_map_file, 'r') as j:
         word_map = json.load(j)
 
@@ -341,4 +343,4 @@ def validate(val_loader, encoder, decoder, criterion):
 
 
 if __name__ == '__main__':
-    main()
+    main(str(DIGIT_WORD_MAP_PATH))

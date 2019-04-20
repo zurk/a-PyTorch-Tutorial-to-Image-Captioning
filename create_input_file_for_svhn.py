@@ -3,8 +3,10 @@ import json
 from pathlib import Path
 import os
 import pandas
-from image_captioning.utils import create_input_files
 from sklearn.model_selection import train_test_split
+
+from image_captioning.constants import DIGIT_WORD_MAP_PATH
+from image_captioning.utils import create_input_files
 
 
 datadir = Path(__file__).parents[1] / "data"
@@ -64,7 +66,9 @@ if __name__ == '__main__':
     create_input_files(dataset='svhn',
                        karpathy_json_path=str(dataset_json),
                        image_folder=str(input_dir),
-                       captions_per_image=5,
+                       captions_per_image=1,
                        min_word_freq=5,
                        output_folder=str(output_folder),
-                       max_len=50)
+                       max_len=10,
+                       word_map=str(DIGIT_WORD_MAP_PATH),
+    )
