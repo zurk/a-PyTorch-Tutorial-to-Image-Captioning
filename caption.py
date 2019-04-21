@@ -10,7 +10,8 @@ import argparse
 from scipy.misc import imread, imresize
 from PIL import Image
 
-from image_captioning.constants import MODEL_INPUT_SIZE
+from image_captioning.constants import MODEL_INPUT_SIZE, KEEP_RATIO
+from image_captioning.utils import resize
 
 device = "cpu"
 
@@ -35,7 +36,7 @@ def caption_image_beam_search(encoder, decoder, image_path, word_map, beam_size=
     if len(img.shape) == 2:
         img = img[:, :, np.newaxis]
         img = np.concatenate([img, img, img], axis=2)
-    img = imresize(img, MODEL_INPUT_SIZE)
+    img = resize(img, MODEL_INPUT_SIZE, KEEP_RATIO)
     img = img.transpose(2, 0, 1)
     img = img / 255.
     img = torch.FloatTensor(img).to(device)

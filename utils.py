@@ -1,14 +1,36 @@
-import os
-import numpy as np
-import h5py
-import json
-import torch
-from scipy.misc import imread, imresize
-from tqdm import tqdm
 from collections import Counter
+import json
+import os
 from random import seed, choice, sample
 
-from constants import MODEL_INPUT_SIZE
+import h5py
+import numpy as np
+from scipy.misc import imread, imresize
+import torch
+from tqdm import tqdm
+
+from image_captioning.constants import MODEL_INPUT_SIZE, KEEP_RATIO
+
+
+def resize(img, shape, keep_ratio):
+    if not keep_ratio:
+        return imresize(img, shape)
+
+    # preserve aspect ratio
+    h, w = img.shape[:2]
+    h_new, w_new = shape
+    h_scale = h_new / h
+    w_scale = w_new / w
+    scale = h_scale if h_scale < w_scale else w_scale
+
+    rescaled_img = imresize(img, scale)
+    if len(rescaled_img.shape) == 3:
+        resized_img = np.zeros((*shape, 3), dtype=rescaled_img.dtype)
+        resized_img[:rescaled_img.shape[0], :rescaled_img.shape[1], :] = rescaled_img
+    else:
+        resized_img = np.zeros(shape, dtype=rescaled_img.dtype)
+        resized_img[:rescaled_img.shape[0], :rescaled_img.shape[1]] = rescaled_img
+    return resized_img
 
 
 def create_input_files(dataset, karpathy_json_path, image_folder, captions_per_image, min_word_freq, output_folder,
@@ -127,7 +149,7 @@ def create_input_files(dataset, karpathy_json_path, image_folder, captions_per_i
                 if len(img.shape) == 2:
                     img = img[:, :, np.newaxis]
                     img = np.concatenate([img, img, img], axis=2)
-                img = imresize(img, MODEL_INPUT_SIZE)
+                img = resize(img, MODEL_INPUT_SIZE, KEEP_RATIO)
                 img = img.transpose(2, 0, 1)
                 assert img.shape == (3, *MODEL_INPUT_SIZE)
                 assert np.max(img) <= 255

@@ -61,7 +61,8 @@ def create_dataset_json_description(input_dir_train, input_dir_test, dataset_jso
 
 
 if __name__ == '__main__':
-    create_dataset_json_description(input_dir_train, input_dir_test, dataset_json)
+    if not dataset_json.exists():
+        create_dataset_json_description(input_dir_train, input_dir_test, dataset_json)
     # Create input files (along with word map)
     create_input_files(dataset='svhn',
                        karpathy_json_path=str(dataset_json),
