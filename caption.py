@@ -10,7 +10,7 @@ import argparse
 from scipy.misc import imread, imresize
 from PIL import Image
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = "cpu"
 
 
 def caption_image_beam_search(encoder, decoder, image_path, word_map, beam_size=3):
@@ -164,7 +164,7 @@ def visualize_att(image_path, seq, alphas, rev_word_map, smooth=True):
 
     plt.figure(figsize=(12, 2), dpi=120)
     plt.subplot(np.ceil((len(words) + 1) / 6.), 6, 1)
-    plt.title('...%s' % (image_path[-20:-3]), color='black', backgroundcolor='white', fontsize=8)
+    plt.title('...%s' % (image_path[-25:]), color='black', fontsize=8)
     plt.imshow(image)
 
     image = image.resize([14 * 24, 14 * 24], Image.LANCZOS)
@@ -174,7 +174,7 @@ def visualize_att(image_path, seq, alphas, rev_word_map, smooth=True):
             break
         plt.subplot(np.ceil((len(words) + 1) / 6.), 6, t + 2)
 
-        plt.text(0, 1, '%s' % (words[t]), color='black', backgroundcolor='white', fontsize=12)
+        plt.title('%s' % (words[t]), color='black', fontsize=12)
         plt.imshow(image)
         current_alpha = alphas[t, :]
         if smooth:
@@ -187,8 +187,7 @@ def visualize_att(image_path, seq, alphas, rev_word_map, smooth=True):
             plt.imshow(alpha, alpha=0.6)
         plt.set_cmap(cm.Greys_r)
         plt.axis('off')
-    plt.subplots_adjust(left=0, bottom=0, right=1, top=1, wspace=0, hspace=0)
-    plt.show()
+    plt.subplots_adjust(left=0, bottom=0, right=1, top=1, wspace=0.01, hspace=0.01)
 
 
 if __name__ == '__main__':
@@ -222,3 +221,4 @@ if __name__ == '__main__':
 
     # Visualize caption and attention of best sequence
     visualize_att(args.img, seq, alphas, rev_word_map, args.smooth)
+    plt.show()
