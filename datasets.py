@@ -23,9 +23,10 @@ class CaptionDataset(Dataset):
         # Open hdf5 file where images are stored
         self.h = h5py.File(os.path.join(data_folder, self.split + '_IMAGES_' + data_name + '.hdf5'), 'r')
         self.imgs = self.h['images']
+        self.img_paths = self.h["paths"]
 
         # Captions per image
-        self.cpi = self.h.attrs['captions_per_image']
+        self.captions_per_image = self.h.attrs['captions_per_image']
 
         # Load encoded captions (completely into memory)
         with open(os.path.join(data_folder, self.split + '_CAPTIONS_' + data_name + '.json'), 'r') as j:
@@ -43,7 +44,8 @@ class CaptionDataset(Dataset):
 
     def __getitem__(self, i):
         # Remember, the Nth caption corresponds to the (N // captions_per_image)th image
-        img = torch.FloatTensor(self.imgs[i // self.cpi] / 255.)
+        image_index = i // self.captions_per_image
+        img = torch.FloatTensor(self.imgs[image_index] / 255.)
         if self.transform is not None:
             img = self.transform(img)
 
@@ -51,13 +53,18 @@ class CaptionDataset(Dataset):
 
         caplen = torch.LongTensor([self.caplens[i]])
 
-        if self.split is 'TRAIN':
+        if self.split == 'TRAIN':
             return img, caption, caplen
-        else:
-            # For validation of testing, also return all 'captions_per_image' captions to find BLEU-4 score
-            all_captions = torch.LongTensor(
-                self.captions[((i // self.cpi) * self.cpi):(((i // self.cpi) * self.cpi) + self.cpi)])
+
+        # For validation or testing, also return all 'captions_per_image' captions to find
+        # BLEU-4 score
+        start = image_index * self.captions_per_image
+        all_captions = torch.LongTensor(self.captions[start:start + self.captions_per_image])
+        if self.split == 'VAL':
             return img, caption, caplen, all_captions
+
+        path = torch.CharTensor(list(self.img_paths[i]))
+        return path, img, caption, caplen, all_captions
 
     def __len__(self):
         return self.dataset_size

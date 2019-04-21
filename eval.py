@@ -9,17 +9,20 @@ from nltk.translate.bleu_score import corpus_bleu
 import torch.nn.functional as F
 from tqdm import tqdm
 
-from datasets import CaptionDataset
+from constants import DATA_DIR
+from image_captioning.constants import DIGIT_WORD_MAP_PATH
+from image_captioning.datasets import CaptionDataset
 from image_captioning.create_input_file_for_svhn import output_folder
 
 FORCE_BREAK = 10
+beam_size = 3
 
 # Parameters
 data_folder = str(output_folder)  # folder with data files saved by create_input_files.py
-data_name = 'svhn_5_cap_per_img_5_min_word_freq'  # base name shared by data files
-checkpoint = './BEST_checkpoint_svhn_5_cap_per_img_5_min_word_freq.pth.tar'  # model checkpoint
-word_map_file = os.path.join(data_folder, 'WORDMAP_svhn_5_cap_per_img_5_min_word_freq.json')  # word map, ensure it's the same the data was encoded with and the model was trained with
-device = "cpu" #torch.device("cuda" if torch.cuda.is_available() else "cpu")  # sets device for model and PyTorch tensors
+data_name = 'svhn_1_cap_per_img_5_min_word_freq'  # base name shared by data files
+checkpoint = './BEST_checkpoint_svhn_1_cap_per_img_5_min_word_freq.pth.tar'  # model checkpoint
+word_map_file = str(DIGIT_WORD_MAP_PATH)
+device = "cpu"  # torch.device("cuda" if torch.cuda.is_available() else "cpu")  # sets device for model and PyTorch tensors
 cudnn.benchmark = True  # set to true only if inputs to model are fixed size; otherwise lot of computational overhead
 
 # Load model
@@ -43,7 +46,8 @@ normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
 
 special_chars = frozenset((word_map['<start>'], word_map['<end>'], word_map['<pad>']))
 
-def evaluate(beam_size):
+
+def evaluate(beam_size, eval_res_file = None):
     """
     Evaluation
 
@@ -51,9 +55,9 @@ def evaluate(beam_size):
     :return: BLEU-4 score
     """
     # DataLoader
+    dataset = CaptionDataset(data_folder, data_name, 'TEST', transform=transforms.Compose([normalize]))
     loader = torch.utils.data.DataLoader(
-        CaptionDataset(data_folder, data_name, 'TEST', transform=transforms.Compose([normalize])),
-        batch_size=1, shuffle=True, num_workers=1, pin_memory=True)
+        dataset, batch_size=1, shuffle=True, num_workers=1, pin_memory=True)
 
     # TODO: Batched Beam Search
     # Therefore, do not use a batch_size greater than 1 - IMPORTANT!
@@ -66,8 +70,8 @@ def evaluate(beam_size):
     correct = 0  # Number of correct captions
 
     # For each image
-    for index, (image, caps, caplens, allcaps) in enumerate(
-            tqdm(loader, desc="EVALUATING AT BEAM SIZE " + str(beam_size)), start=1):
+    for index, (path, image, caps, caplens, allcaps) in enumerate(
+            tqdm(loader, desc="EVALUATING AT BEAM SIZE " + str(beam_size))):
 
         k = beam_size
 
@@ -161,12 +165,12 @@ def evaluate(beam_size):
                 break
             step += 1
 
-        i = complete_seqs_scores.index(max(complete_seqs_scores))
+        max_score = max(complete_seqs_scores)
+        i = complete_seqs_scores.index(max_score)
         seq = complete_seqs[i]
 
         # References
         img_caps = allcaps[0].tolist()[0]  # We expect only one caption.
-        # Should be fixed in data preparation.
         img_caption = [w for w in img_caps if w not in special_chars]  # remove <start> and pads
         references.append(img_caption)
 
@@ -176,15 +180,23 @@ def evaluate(beam_size):
 
         assert len(references) == len(hypotheses)
 
+        if eval_res_file:
+            path = bytes(path[0]).decode()
+            predicted_number = "".join(map(str, hypothesis))
+            correct_number = "".join(map(str, img_caption))
+            eval_res_file.write(",".join(
+                (path, predicted_number, correct_number, "%f" % max_score)) + "\n")
+
         if img_caption == hypothesis:
             correct += 1
 
-        if index % 100 == 0:
+        if index % 100 == 99:
             print("\nAccuracy is %.3f" % (correct / index))
 
     return correct / index
 
 
 if __name__ == '__main__':
-    beam_size = 1
-    print("\nAccuracy score is %.4f." % evaluate(beam_size))
+    with open("svhn_eval_res.csv", "w") as f:
+        f.write("path,predicted,correct,score\n")
+        print("\nAccuracy score is %.4f." % evaluate(beam_size, f))
