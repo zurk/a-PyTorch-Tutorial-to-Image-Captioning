@@ -46,7 +46,7 @@ alpha_c = 1.  # regularization parameter for 'doubly stochastic attention', as i
 best_bleu4 = 0.  # BLEU-4 score right now
 print_freq = 100  # print training/validation stats every __ batches
 fine_tune_encoder = True  # fine-tune encoder?
-checkpoint = "BEST_checkpoint_svhn_1_cap_per_img_5_min_word_freq.pth.tar" # None  # path to checkpoint, None if none
+checkpoint = None  # path to checkpoint, None if none
 
 
 def main(word_map_file=None):
