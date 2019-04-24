@@ -239,7 +239,7 @@ def clip_gradient(optimizer, grad_clip):
 
 
 def save_checkpoint(data_name, epoch, epochs_since_improvement, encoder, decoder, encoder_optimizer, decoder_optimizer,
-                    bleu4, is_best):
+                    metrics, best_norm_edit, is_best):
     """
     Saves model checkpoint.
 
@@ -250,12 +250,14 @@ def save_checkpoint(data_name, epoch, epochs_since_improvement, encoder, decoder
     :param decoder: decoder model
     :param encoder_optimizer: optimizer to update encoder's weights, if fine-tuning
     :param decoder_optimizer: optimizer to update decoder's weights
-    :param bleu4: validation BLEU-4 score for this epoch
+    :param metrics: train and validation metrics
+    :param best_norm_edit: validation best normalized edit distance
     :param is_best: is this checkpoint the best so far?
     """
     state = {'epoch': epoch,
              'epochs_since_improvement': epochs_since_improvement,
-             'bleu-4': bleu4,
+             'metrics': metrics,
+             'best_norm_edit': best_norm_edit,
              'encoder': encoder,
              'decoder': decoder,
              'encoder_optimizer': encoder_optimizer,

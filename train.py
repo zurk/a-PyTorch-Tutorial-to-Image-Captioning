@@ -1,3 +1,4 @@
+import editdistance
 import json
 import os
 import time
@@ -15,7 +16,6 @@ from image_captioning.datasets import CaptionDataset
 from image_captioning.models import Encoder, DecoderWithAttention
 from image_captioning.utils import adjust_learning_rate, AverageMeter, clip_gradient, accuracy, \
     save_checkpoint
-from nltk.translate.bleu_score import corpus_bleu
 
 MAX_NO_IMPROVEMENT = 5
 NO_IMPROVEMENT_ADJUST_RATE = 3
@@ -38,14 +38,14 @@ cudnn.benchmark = True  # set to true only if inputs to model are fixed size; ot
 # Training parameters
 start_epoch = 0
 epochs = 120  # number of epochs to train for (if early stopping is not triggered)
-epochs_since_improvement = 0  # keeps track of number of epochs since there's been an improvement in validation BLEU
+epochs_since_improvement = 0  # keeps track of number of epochs since there's been an improvement in validation metric
 batch_size = 256
 workers = 1  # for data-loading; right now, only 1 works with h5py
 encoder_lr = 1e-4  # learning rate for encoder if fine-tuning
 decoder_lr = 4e-4  # learning rate for decoder
 grad_clip = 5.  # clip gradients at an absolute value of
 alpha_c = 1.  # regularization parameter for 'doubly stochastic attention', as in the paper
-best_bleu4 = 0.  # BLEU-4 score right now
+best_norm_edit = float("inf")  # norm edit distance score right now
 print_freq = 100  # print training/validation stats every __ batches
 fine_tune_encoder = True  # fine-tune encoder?
 checkpoint = None  # path to checkpoint, None if none
@@ -56,7 +56,7 @@ def main(word_map_file=None):
     Training and validation.
     """
 
-    global best_bleu4, epochs_since_improvement, checkpoint, start_epoch, fine_tune_encoder, data_name, word_map
+    global best_norm_edit, epochs_since_improvement, checkpoint, start_epoch, fine_tune_encoder, data_name, word_map
 
     # Read word map
     if word_map_file is None:
@@ -78,12 +78,14 @@ def main(word_map_file=None):
         encoder.fine_tune(fine_tune_encoder)
         encoder_optimizer = torch.optim.Adam(params=filter(lambda p: p.requires_grad, encoder.parameters()),
                                              lr=encoder_lr) if fine_tune_encoder else None
+        metrics_train = []
+        metrics_val = []
 
     else:
         checkpoint = torch.load(checkpoint)
         start_epoch = checkpoint['epoch'] + 1
         epochs_since_improvement = checkpoint['epochs_since_improvement']
-        best_bleu4 = checkpoint['bleu-4']
+        best_norm_edit = checkpoint['best_norm_edit']
         decoder = checkpoint['decoder']
         decoder_optimizer = checkpoint['decoder_optimizer']
         encoder = checkpoint['encoder']
@@ -92,6 +94,9 @@ def main(word_map_file=None):
             encoder.fine_tune(fine_tune_encoder)
             encoder_optimizer = torch.optim.Adam(params=filter(lambda p: p.requires_grad, encoder.parameters()),
                                                  lr=encoder_lr)
+
+        metrics_train = checkpoint["metrics"]["train"]
+        metrics_val = checkpoint["metrics"]["val"]
 
     # Move to GPU, if available
     decoder = decoder.to(device)
@@ -113,8 +118,6 @@ def main(word_map_file=None):
         batch_size=batch_size, shuffle=True, num_workers=workers, pin_memory=True)
 
     # Epochs
-    metrics_train = []
-    metrics_val = []
     for epoch in range(start_epoch, epochs):
 
         # Decay learning rate if there is no improvement for 8 consecutive epochs, and terminate training after 20
@@ -141,25 +144,26 @@ def main(word_map_file=None):
                                     decoder=decoder,
                                     criterion=criterion))
 
-        recent_bleu4 = metrics_val[-1]["bleu4"]
+        recent_norm_edit = metrics_val[-1]["norm_edit"]
         # Check if there was an improvement
-        is_best = recent_bleu4 > best_bleu4
-        best_bleu4 = max(recent_bleu4, best_bleu4)
+        is_best = recent_norm_edit < best_norm_edit
+        best_norm_edit = min(recent_norm_edit, best_norm_edit)
         if not is_best:
             epochs_since_improvement += 1
             print("\nEpochs since last improvement: %d\n" % (epochs_since_improvement,))
         else:
             epochs_since_improvement = 0
 
+        metrics = {
+            "train": metrics_train,
+            "val": metrics_val,
+        }
         # Save checkpoint
         save_checkpoint(data_name, epoch, epochs_since_improvement, encoder, decoder, encoder_optimizer,
-                        decoder_optimizer, recent_bleu4, is_best)
+                        decoder_optimizer, metrics, best_norm_edit, is_best)
 
         with open("metrics.json", "w") as f:
-            json.dump({
-                "train": metrics_train,
-                "val": metrics_val,
-            }, f, indent=2)
+            json.dump(metrics, f, indent=2)
 
     pprint(metrics_train)
     pprint(metrics_val)
@@ -247,15 +251,15 @@ def train(train_loader, encoder, decoder, criterion, encoder_optimizer, decoder_
                   'Batch Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                   'Data Load Time {data_time.val:.3f} ({data_time.avg:.3f})\t'
                   'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                  'Top-{k} Accuracy {topk.val:.3f} ({topk.avg:.3f})'.format(
-                epoch, i, len(train_loader), batch_time=batch_time, data_time=data_time,
-                loss=losses, topk=topk_accs, k=TOP_K_ACCURACY))
+                  'Error {error_val:.5f} ({error_avg:.5f})'.format(
+                  epoch, i, len(train_loader), batch_time=batch_time, data_time=data_time,
+                  loss=losses, error_val=1-topk_accs.val/100, error_avg=1-topk_accs.avg/100))
 
     train_loader.dataset.increment_chunk()
 
     return {
         "losses": losses.avg,
-        "topk_accs": topk_accs.avg,
+        "error": 1 - topk_accs.avg/100,
     }
 
 
@@ -267,7 +271,7 @@ def validate(val_loader, encoder, decoder, criterion, print_freq=None):
     :param encoder: encoder model
     :param decoder: decoder model
     :param criterion: loss layer
-    :return: BLEU-4 score
+    :return: metrics
     """
     decoder.eval()  # eval mode (no dropout or batchnorm)
     if encoder is not None:
@@ -279,7 +283,7 @@ def validate(val_loader, encoder, decoder, criterion, print_freq=None):
 
     start = time.time()
 
-    references = list()  # references (true captions) for calculating BLEU-4 score
+    references = list()  # references (true captions) for calculating metrics
     hypotheses = list()  # hypotheses (predictions)
 
     # explicitly disable gradient calculation to avoid CUDA memory error
@@ -322,12 +326,13 @@ def validate(val_loader, encoder, decoder, criterion, print_freq=None):
             start = time.time()
 
             if print_freq is not None and i % print_freq == 0:
+                # FIXME
                 print('Validation: [{0}/{1}]\t'
                       'Batch Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                      'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                      'Top-{k} Accuracy {topk.val:.3f} ({topk.avg:.3f})\t'.format(
+                      'Loss {loss.val:.5f} ({loss.avg:.5f})\t'
+                      'ERROR {error_val:.5f} ({error_avg:.5f})\t'.format(
                     i, len(val_loader), batch_time=batch_time, loss=losses, topk=topkaccs,
-                    k=TOP_K_ACCURACY))
+                    error_avg=1-topkaccs.avg/100, error_val=1-topkaccs.val/100))
 
             # Store references (true captions), and hypothesis (prediction) for each image
             # If for n images, we have n hypotheses, and references a, b, c... for each image, we need -
@@ -353,20 +358,36 @@ def validate(val_loader, encoder, decoder, criterion, print_freq=None):
 
             assert len(references) == len(hypotheses)
 
-        # Calculate BLEU-4 scores
-        bleu4 = corpus_bleu(references, hypotheses)
+    # Calculate metrics
+    metrics = calc_edit_distance(references, hypotheses)
 
-        print(
-            '\n * LOSS - {loss.avg:.3f}, TOP-{k} ACCURACY - {topk.avg:.3f}, BLEU-4 - {bleu}\n'.format(
-                loss=losses,
-                topk=topkaccs,
-                bleu=bleu4,
-                k=TOP_K_ACCURACY))
+    print(
+        '\n * LOSS - {loss.avg:.5f}, ERROR - {error:.5f}, '
+        'norm edit distance - {edit_distance:.5f}\n'.format(
+            loss=losses,
+            error=1-topkaccs.avg/100,
+            edit_distance=metrics["norm_edit"],
+        ))
+
+    metrics.update({
+        "losses": losses.avg,
+        "error": 1 - topkaccs.avg/100,
+    })
+
+    return metrics
+
+
+def calc_edit_distance(references, hypotheses):
+    distances = AverageMeter()
+    norm_distances = AverageMeter()
+    for r, h in zip(references, hypotheses):
+        dist = editdistance.eval(r[0], h)
+        distances.update(dist)
+        norm_distances.update(dist / len(r[0]))
 
     return {
-        "losses": losses.avg,
-        "topkaccs": topkaccs.avg,
-        "bleu4": bleu4,
+        "edit": distances.avg,
+        "norm_edit": norm_distances.avg,
     }
 
 
