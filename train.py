@@ -19,6 +19,7 @@ from nltk.translate.bleu_score import corpus_bleu
 MAX_NO_IMPROVEMENT = 5
 NO_IMPROVEMENT_ADJUST_RATE = 3
 TOP_K_ACCURACY = 1
+EPOCH_PER_DATASET = 10
 
 # Data parameters
 data_folder = str(output_folder)  # folder with data files saved by create_input_files.py
@@ -102,13 +103,17 @@ def main(word_map_file=None):
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
     train_loader = torch.utils.data.DataLoader(
-        CaptionDataset(data_folder, data_name, 'TRAIN', transform=transforms.Compose([normalize])),
+        CaptionDataset(data_folder, data_name, 'TRAIN', epoch_per_dataset=EPOCH_PER_DATASET,
+                       transform=transforms.Compose([normalize])),
         batch_size=batch_size, shuffle=True, num_workers=workers, pin_memory=True)
     val_loader = torch.utils.data.DataLoader(
-        CaptionDataset(data_folder, data_name, 'VAL', transform=transforms.Compose([normalize])),
+        CaptionDataset(data_folder, data_name, 'VAL',
+                       transform=transforms.Compose([normalize])),
         batch_size=batch_size, shuffle=True, num_workers=workers, pin_memory=True)
 
     # Epochs
+    metrics_train = []
+    metrics_val = []
     for epoch in range(start_epoch, epochs):
 
         # Decay learning rate if there is no improvement for 8 consecutive epochs, and terminate training after 20
@@ -121,20 +126,21 @@ def main(word_map_file=None):
                 adjust_learning_rate(encoder_optimizer, 0.8)
 
         # One epoch's training
-        train(train_loader=train_loader,
-              encoder=encoder,
-              decoder=decoder,
-              criterion=criterion,
-              encoder_optimizer=encoder_optimizer,
-              decoder_optimizer=decoder_optimizer,
-              epoch=epoch)
+        metrics_train.append(train(train_loader=train_loader,
+                                   encoder=encoder,
+                                   decoder=decoder,
+                                   criterion=criterion,
+                                   encoder_optimizer=encoder_optimizer,
+                                   decoder_optimizer=decoder_optimizer,
+                                   epoch=epoch))
 
         # One epoch's validation
-        recent_bleu4 = validate(val_loader=val_loader,
-                                encoder=encoder,
-                                decoder=decoder,
-                                criterion=criterion)
+        metrics_val.append(validate(val_loader=val_loader,
+                                    encoder=encoder,
+                                    decoder=decoder,
+                                    criterion=criterion))
 
+        recent_bleu4 = metrics_val[-1]["bleu4"]
         # Check if there was an improvement
         is_best = recent_bleu4 > best_bleu4
         best_bleu4 = max(recent_bleu4, best_bleu4)
@@ -160,6 +166,7 @@ def train(train_loader, encoder, decoder, criterion, encoder_optimizer, decoder_
     :param encoder_optimizer: optimizer to update encoder's weights (if fine-tuning)
     :param decoder_optimizer: optimizer to update decoder's weights
     :param epoch: epoch number
+    :param epoch_per_dataset: epochs number to cover all dataset one time.
     """
 
     decoder.train()  # train mode (dropout and batchnorm is used)
@@ -234,8 +241,15 @@ def train(train_loader, encoder, decoder, criterion, encoder_optimizer, decoder_
                 epoch, i, len(train_loader), batch_time=batch_time, data_time=data_time,
                 loss=losses, topk=topk_accs, k=TOP_K_ACCURACY))
 
+    train_loader.dataset.increment_chunk()
 
-def validate(val_loader, encoder, decoder, criterion):
+    return {
+        "losses": losses,
+        "topk_accs": topk_accs,
+    }
+
+
+def validate(val_loader, encoder, decoder, criterion, print_freq=None):
     """
     Performs one epoch's validation.
 
@@ -297,7 +311,7 @@ def validate(val_loader, encoder, decoder, criterion):
 
             start = time.time()
 
-            if i % print_freq == 0:
+            if print_freq is not None and i % print_freq == 0:
                 print('Validation: [{0}/{1}]\t'
                       'Batch Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                       'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
@@ -339,7 +353,11 @@ def validate(val_loader, encoder, decoder, criterion):
                 bleu=bleu4,
                 k=TOP_K_ACCURACY))
 
-    return bleu4
+    return {
+        "losses": losses,
+        "topkaccs": topkaccs,
+        "bleu4": bleu4,
+    }
 
 
 if __name__ == '__main__':

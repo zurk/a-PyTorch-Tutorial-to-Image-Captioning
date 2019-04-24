@@ -10,7 +10,7 @@ class CaptionDataset(Dataset):
     A PyTorch Dataset class to be used in a PyTorch DataLoader to create batches.
     """
 
-    def __init__(self, data_folder, data_name, split, transform=None):
+    def __init__(self, data_folder, data_name, split, epoch_per_dataset=1, transform=None):
         """
         :param data_folder: folder where data files are stored
         :param data_name: base name of processed datasets
@@ -39,11 +39,14 @@ class CaptionDataset(Dataset):
         # PyTorch transformation pipeline for the image (normalizing, etc.)
         self.transform = transform
 
-        # Total number of datapoints
-        self.dataset_size = len(self.captions)
+        self.epoch_per_dataset = epoch_per_dataset
+        self.current_dataset_chunk = 0
+        self.dataset_chunk_size = len(self.captions) // self.epoch_per_dataset
 
     def __getitem__(self, i):
         # Remember, the Nth caption corresponds to the (N // captions_per_image)th image
+        assert i <= len(self)
+        i += self.dataset_chunk_size * self.current_dataset_chunk
         image_index = i // self.captions_per_image
         img = torch.FloatTensor(self.imgs[image_index] / 255.)
         if self.transform is not None:
@@ -67,4 +70,10 @@ class CaptionDataset(Dataset):
         return path, img, caption, caplen, all_captions
 
     def __len__(self):
-        return self.dataset_size
+        if self.current_dataset_chunk == self.epoch_per_dataset - 1:
+            return len(self.captions) - self.dataset_chunk_size * self.current_dataset_chunk
+        return self.dataset_chunk_size
+
+    def increment_chunk(self):
+        self.current_dataset_chunk += 1
+        self.current_dataset_chunk = self.current_dataset_chunk % self.epoch_per_dataset
