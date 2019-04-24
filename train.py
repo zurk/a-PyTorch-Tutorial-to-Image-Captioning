@@ -7,6 +7,7 @@ import torch.utils.data
 import torchvision.transforms as transforms
 from torch import nn
 from torch.nn.utils.rnn import pack_padded_sequence
+from pprint import pprint
 
 from image_captioning.constants import DIGIT_WORD_MAP_PATH
 from image_captioning.create_input_file_for_svhn import output_folder
@@ -154,6 +155,15 @@ def main(word_map_file=None):
         save_checkpoint(data_name, epoch, epochs_since_improvement, encoder, decoder, encoder_optimizer,
                         decoder_optimizer, recent_bleu4, is_best)
 
+        with open("metrics.json", "w") as f:
+            json.dump({
+                "train": metrics_train,
+                "val": metrics_val,
+            }, f, indent=2)
+
+    pprint(metrics_train)
+    pprint(metrics_val)
+
 
 def train(train_loader, encoder, decoder, criterion, encoder_optimizer, decoder_optimizer, epoch):
     """
@@ -244,8 +254,8 @@ def train(train_loader, encoder, decoder, criterion, encoder_optimizer, decoder_
     train_loader.dataset.increment_chunk()
 
     return {
-        "losses": losses,
-        "topk_accs": topk_accs,
+        "losses": losses.avg,
+        "topk_accs": topk_accs.avg,
     }
 
 
@@ -354,8 +364,8 @@ def validate(val_loader, encoder, decoder, criterion, print_freq=None):
                 k=TOP_K_ACCURACY))
 
     return {
-        "losses": losses,
-        "topkaccs": topkaccs,
+        "losses": losses.avg,
+        "topkaccs": topkaccs.avg,
         "bleu4": bleu4,
     }
 
