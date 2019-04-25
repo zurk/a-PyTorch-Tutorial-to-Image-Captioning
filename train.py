@@ -45,7 +45,7 @@ encoder_lr = 1e-4  # learning rate for encoder if fine-tuning
 decoder_lr = 4e-4  # learning rate for decoder
 grad_clip = 5.  # clip gradients at an absolute value of
 alpha_c = 1.  # regularization parameter for 'doubly stochastic attention', as in the paper
-best_norm_edit = float("inf")  # norm edit distance score right now
+best_error = float("inf")  # norm edit distance score right now
 print_freq = 100  # print training/validation stats every __ batches
 fine_tune_encoder = True  # fine-tune encoder?
 checkpoint = None  # path to checkpoint, None if none
@@ -56,7 +56,7 @@ def main(word_map_file=None):
     Training and validation.
     """
 
-    global best_norm_edit, epochs_since_improvement, checkpoint, start_epoch, fine_tune_encoder, data_name, word_map
+    global best_error, epochs_since_improvement, checkpoint, start_epoch, fine_tune_encoder, data_name, word_map
 
     # Read word map
     if word_map_file is None:
@@ -85,7 +85,7 @@ def main(word_map_file=None):
         checkpoint = torch.load(checkpoint)
         start_epoch = checkpoint['epoch'] + 1
         epochs_since_improvement = checkpoint['epochs_since_improvement']
-        best_norm_edit = checkpoint['best_norm_edit']
+        best_error = checkpoint['best_error']
         decoder = checkpoint['decoder']
         decoder_optimizer = checkpoint['decoder_optimizer']
         encoder = checkpoint['encoder']
@@ -144,10 +144,10 @@ def main(word_map_file=None):
                                     decoder=decoder,
                                     criterion=criterion))
 
-        recent_norm_edit = metrics_val[-1]["norm_edit"]
+        recent_error = metrics_val[-1]["error"]
         # Check if there was an improvement
-        is_best = recent_norm_edit < best_norm_edit
-        best_norm_edit = min(recent_norm_edit, best_norm_edit)
+        is_best = recent_error < best_error
+        best_error = min(recent_error, best_error)
         if not is_best:
             epochs_since_improvement += 1
             print("\nEpochs since last improvement: %d\n" % (epochs_since_improvement,))
@@ -160,7 +160,7 @@ def main(word_map_file=None):
         }
         # Save checkpoint
         save_checkpoint(data_name, epoch, epochs_since_improvement, encoder, decoder, encoder_optimizer,
-                        decoder_optimizer, metrics, best_norm_edit, is_best)
+                        decoder_optimizer, metrics, best_error, is_best)
 
         with open("metrics.json", "w") as f:
             json.dump(metrics, f, indent=2)
