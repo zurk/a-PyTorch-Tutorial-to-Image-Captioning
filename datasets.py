@@ -10,7 +10,8 @@ class CaptionDataset(Dataset):
     A PyTorch Dataset class to be used in a PyTorch DataLoader to create batches.
     """
 
-    def __init__(self, data_folder, data_name, split, epoch_per_dataset=1, transform=None):
+    def __init__(self, data_folder, data_name, split, epoch_per_dataset=1, transform=None,
+                 eval_mode=False):
         """
         :param data_folder: folder where data files are stored
         :param data_name: base name of processed datasets
@@ -42,6 +43,7 @@ class CaptionDataset(Dataset):
         self.epoch_per_dataset = epoch_per_dataset
         self.current_dataset_chunk = 0
         self.dataset_chunk_size = len(self.captions) // self.epoch_per_dataset
+        self.eval_mode = eval_mode
 
     def __getitem__(self, i):
         # Remember, the Nth caption corresponds to the (N // captions_per_image)th image
@@ -63,7 +65,7 @@ class CaptionDataset(Dataset):
         # BLEU-4 score
         start = image_index * self.captions_per_image
         all_captions = torch.LongTensor(self.captions[start:start + self.captions_per_image])
-        if self.split == 'VAL':
+        if not self.eval_mode:
             return img, caption, caplen, all_captions
 
         path = torch.CharTensor(list(self.img_paths[i]))

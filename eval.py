@@ -53,7 +53,8 @@ def evaluate(beam_size, data_folder, data_name, eval_res_file = None):
     :return: BLEU-4 score
     """
     # DataLoader
-    dataset = CaptionDataset(data_folder, data_name, 'TEST', transform=transforms.Compose([normalize]))
+    dataset = CaptionDataset(data_folder, data_name, 'TEST', transform=transforms.Compose([normalize]),
+                             eval_mode=True)
     loader = torch.utils.data.DataLoader(
         dataset, batch_size=1, shuffle=True, num_workers=1, pin_memory=True)
 
