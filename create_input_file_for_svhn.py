@@ -11,24 +11,25 @@ from image_captioning.utils import create_input_files
 
 datadir = Path(__file__).parents[1] / "data"
 input_dir = datadir / "svhn"
+input_dir_extra = input_dir / "extra"
 input_dir_test = input_dir / "test"
 input_dir_train = input_dir / "train"
 output_folder = datadir / 'svhn_image_captioning'
 dataset_json = output_folder / "dataset_svhn.json"
 
 
-def create_dataset_json_description(input_dir_train, input_dir_test, dataset_json):
+def create_dataset_json_description(input_dir_train, input_dir_test, input_dir_extra, dataset_json):
     images = []
 
     labels = defaultdict(list)
-    for input_dir in (input_dir_train, input_dir_test):
-        bbox_data = pandas.read_csv(next(input_dir.glob("*.csv")), index_col=0)
+    for input_dir in (input_dir_train, input_dir_test, input_dir_extra):
+        bbox_data = pandas.read_csv(list(input_dir.glob("*.csv"))[0], index_col=0)
         for index, row in bbox_data.iterrows():
             label = row["label"]
             label = 0 if label == 10 else label
             labels[index].append((row["xmin"], str(label)))
 
-    train_indexes, _ = train_test_split(range(33405), test_size=0.2, random_state=1994)
+    train_indexes, _ = train_test_split(range(len(labels)), test_size=0.05, random_state=1994)
     train_indexes = sorted(train_indexes)
     train_val_index = 0
     train_index = 0
@@ -62,7 +63,8 @@ def create_dataset_json_description(input_dir_train, input_dir_test, dataset_jso
 
 if __name__ == '__main__':
     if not dataset_json.exists():
-        create_dataset_json_description(input_dir_train, input_dir_test, dataset_json)
+        create_dataset_json_description(input_dir_train, input_dir_test, input_dir_extra,
+                                        dataset_json)
     # Create input files (along with word map)
     create_input_files(dataset='svhn',
                        karpathy_json_path=str(dataset_json),

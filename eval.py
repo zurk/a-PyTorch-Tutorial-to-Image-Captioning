@@ -66,7 +66,7 @@ def evaluate(beam_size, data_folder, data_name, eval_res_file = None):
     # references = [[ref1a, ref1b, ref1c], [ref2a, ref2b], ...], hypotheses = [hyp1, hyp2, ...]
     references = list()
     hypotheses = list()
-    correct = 0  # Number of correct captions
+    error = 0  # Number of error captions
 
     # For each image
     for index, (path, image, caps, caplens, allcaps) in enumerate(
@@ -186,13 +186,13 @@ def evaluate(beam_size, data_folder, data_name, eval_res_file = None):
             eval_res_file.write(",".join(
                 (path, predicted_number, correct_number, "%f" % max_score)) + "\n")
 
-        if img_caption == hypothesis:
-            correct += 1
+        if img_caption != hypothesis:
+            error += 1
 
         if index % 100 == 99:
-            print("\nAccuracy is %.3f" % (correct / index))
+            print("\nError is %.3f" % (error / index))
 
-    return correct / index
+    return error / index
 
 
 if __name__ == '__main__':

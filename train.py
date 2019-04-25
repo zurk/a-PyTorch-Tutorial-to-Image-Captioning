@@ -17,10 +17,10 @@ from image_captioning.models import Encoder, DecoderWithAttention
 from image_captioning.utils import adjust_learning_rate, AverageMeter, clip_gradient, accuracy, \
     save_checkpoint
 
-MAX_NO_IMPROVEMENT = 5
-NO_IMPROVEMENT_ADJUST_RATE = 3
+MAX_NO_IMPROVEMENT = 10
+NO_IMPROVEMENT_ADJUST_RATE = 4
 TOP_K_ACCURACY = 1
-EPOCH_PER_DATASET = 10
+EPOCH_PER_DATASET = 20
 
 # Data parameters
 data_folder = str(output_folder)  # folder with data files saved by create_input_files.py
@@ -37,9 +37,9 @@ cudnn.benchmark = True  # set to true only if inputs to model are fixed size; ot
 
 # Training parameters
 start_epoch = 0
-epochs = 120  # number of epochs to train for (if early stopping is not triggered)
+epochs = 1000  # number of epochs to train for (if early stopping is not triggered)
 epochs_since_improvement = 0  # keeps track of number of epochs since there's been an improvement in validation metric
-batch_size = 256
+batch_size = 512
 workers = 1  # for data-loading; right now, only 1 works with h5py
 encoder_lr = 1e-4  # learning rate for encoder if fine-tuning
 decoder_lr = 4e-4  # learning rate for decoder
@@ -180,7 +180,6 @@ def train(train_loader, encoder, decoder, criterion, encoder_optimizer, decoder_
     :param encoder_optimizer: optimizer to update encoder's weights (if fine-tuning)
     :param decoder_optimizer: optimizer to update decoder's weights
     :param epoch: epoch number
-    :param epoch_per_dataset: epochs number to cover all dataset one time.
     """
 
     decoder.train()  # train mode (dropout and batchnorm is used)
