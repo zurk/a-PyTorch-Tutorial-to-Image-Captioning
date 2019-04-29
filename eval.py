@@ -7,17 +7,17 @@ import torchvision.transforms as transforms
 import torch.nn.functional as F
 from tqdm import tqdm
 
-from image_captioning.constants import DIGIT_WORD_MAP_PATH, SVHN_EVAL_PATH
+from image_captioning.constants import DIGIT_WORD_MAP_PATH, SVHN_EVAL_PATH, normalize
 from image_captioning.datasets import CaptionDataset
 import image_captioning.create_input_file_for_svhn as svhn
 
 FORCE_BREAK = 10
-beam_size = 3
+beam_size = 1
 
 # Parameters
-checkpoint = './BEST_checkpoint_svhn_1_cap_per_img_5_min_word_freq.pth.tar'  # model checkpoint
+checkpoint = './BEST_checkpoint_svhn_1_cap_per_img_1_min_word_freq.pth.tar'  # model checkpoint
 word_map_file = str(DIGIT_WORD_MAP_PATH)
-device = "cpu"  # torch.device("cuda" if torch.cuda.is_available() else "cpu")  # sets device for model and PyTorch tensors
+device = "cuda"  # torch.device("cuda" if torch.cuda.is_available() else "cpu")  # sets device for model and PyTorch tensors
 cudnn.benchmark = True  # set to true only if inputs to model are fixed size; otherwise lot of computational overhead
 
 # Load model
@@ -35,10 +35,6 @@ with open(word_map_file, 'r') as j:
 rev_word_map = {v: k for k, v in word_map.items()}
 vocab_size = len(word_map)
 
-# Normalization transform
-normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                 std=[0.229, 0.224, 0.225])
-
 special_chars = frozenset((word_map['<start>'], word_map['<end>'], word_map['<pad>']))
 
 
@@ -53,10 +49,10 @@ def evaluate(beam_size, data_folder, data_name, eval_res_file = None):
     :return: BLEU-4 score
     """
     # DataLoader
-    dataset = CaptionDataset(data_folder, data_name, 'TEST', transform=transforms.Compose([normalize]),
-                             eval_mode=True)
+    dataset = CaptionDataset(
+        data_folder, data_name, 'TEST', transform=transforms.Compose([normalize]), eval_mode=True)
     loader = torch.utils.data.DataLoader(
-        dataset, batch_size=1, shuffle=True, num_workers=1, pin_memory=True)
+        dataset, batch_size=1, shuffle=False, num_workers=1, pin_memory=True)
 
     # TODO: Batched Beam Search
     # Therefore, do not use a batch_size greater than 1 - IMPORTANT!
@@ -199,5 +195,5 @@ if __name__ == '__main__':
     with open(str(SVHN_EVAL_PATH), "w") as f:
         f.write("path,predicted,correct,score\n")
         data_folder = str(svhn.output_folder)
-        data_name = 'svhn_1_cap_per_img_5_min_word_freq'
-        print("\nAccuracy score is %.4f." % evaluate(beam_size, data_folder, data_name, f))
+        data_name = 'svhn_1_cap_per_img_1_min_word_freq'
+        print("\nError score is %.4f." % evaluate(beam_size, data_folder, data_name, f))

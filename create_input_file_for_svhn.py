@@ -70,8 +70,7 @@ if __name__ == '__main__':
                        karpathy_json_path=str(dataset_json),
                        image_folder=str(input_dir),
                        captions_per_image=1,
-                       min_word_freq=5,
+                       min_word_freq=1,
                        output_folder=str(output_folder),
                        max_len=10,
-                       word_map=str(DIGIT_WORD_MAP_PATH),
-    )
+                       word_map=str(DIGIT_WORD_MAP_PATH))

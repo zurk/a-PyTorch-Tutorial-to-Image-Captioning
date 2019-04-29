@@ -2,6 +2,7 @@ import editdistance
 import json
 import os
 import time
+import torch
 import torch.backends.cudnn as cudnn
 import torch.optim
 import torch.utils.data
@@ -10,7 +11,7 @@ from torch import nn
 from torch.nn.utils.rnn import pack_padded_sequence
 from pprint import pprint
 
-from image_captioning.constants import DIGIT_WORD_MAP_PATH
+from image_captioning.constants import DIGIT_WORD_MAP_PATH, normalize
 from image_captioning.create_input_file_for_svhn import output_folder
 from image_captioning.datasets import CaptionDataset
 from image_captioning.models import Encoder, DecoderWithAttention
@@ -24,7 +25,7 @@ EPOCH_PER_DATASET = 20
 
 # Data parameters
 data_folder = str(output_folder)  # folder with data files saved by create_input_files.py
-data_name = 'svhn_1_cap_per_img_5_min_word_freq'  # base name shared by data files
+data_name = 'svhn_1_cap_per_img_1_min_word_freq'  # base name shared by data files
 
 # Model parameters
 emb_dim = 512  # dimension of word embeddings
@@ -80,6 +81,7 @@ def main(word_map_file=None):
                                              lr=encoder_lr) if fine_tune_encoder else None
         metrics_train = []
         metrics_val = []
+        metrics_test = []
 
     else:
         checkpoint = torch.load(checkpoint)
@@ -105,17 +107,20 @@ def main(word_map_file=None):
     # Loss function
     criterion = nn.CrossEntropyLoss().to(device)
 
+    # Datasets
+    svhn_train = CaptionDataset(
+        data_folder, data_name, 'TRAIN', epoch_per_dataset=EPOCH_PER_DATASET, transform=normalize)
+    svhn_val = CaptionDataset(
+        data_folder, data_name, 'VAL', transform=normalize)
+    svhn_test = CaptionDataset(
+        data_folder, data_name, 'TEST', transform=normalize)
     # Custom dataloaders
-    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225])
     train_loader = torch.utils.data.DataLoader(
-        CaptionDataset(data_folder, data_name, 'TRAIN', epoch_per_dataset=EPOCH_PER_DATASET,
-                       transform=transforms.Compose([normalize])),
-        batch_size=batch_size, shuffle=True, num_workers=workers, pin_memory=True)
+        svhn_train, batch_size=batch_size, shuffle=True, num_workers=workers, pin_memory=True)
     val_loader = torch.utils.data.DataLoader(
-        CaptionDataset(data_folder, data_name, 'VAL',
-                       transform=transforms.Compose([normalize])),
-        batch_size=batch_size, shuffle=True, num_workers=workers, pin_memory=True)
+        svhn_val, batch_size=batch_size, shuffle=True, num_workers=workers, pin_memory=True)
+    test_loader = torch.utils.data.DataLoader(
+        svhn_test, batch_size=batch_size, shuffle=True, num_workers=workers, pin_memory=True)
 
     # Epochs
     for epoch in range(start_epoch, epochs):
@@ -139,10 +144,16 @@ def main(word_map_file=None):
                                    epoch=epoch))
 
         # One epoch's validation
+        print("Validation")
         metrics_val.append(validate(val_loader=val_loader,
                                     encoder=encoder,
                                     decoder=decoder,
                                     criterion=criterion))
+        print("Test")
+        metrics_test.append(validate(val_loader=test_loader,
+                                     encoder=encoder,
+                                     decoder=decoder,
+                                     criterion=criterion))
 
         recent_error = metrics_val[-1]["error"]
         # Check if there was an improvement
@@ -157,6 +168,7 @@ def main(word_map_file=None):
         metrics = {
             "train": metrics_train,
             "val": metrics_val,
+            "test": metrics_test,
         }
         # Save checkpoint
         save_checkpoint(data_name, epoch, epochs_since_improvement, encoder, decoder, encoder_optimizer,
@@ -192,8 +204,11 @@ def train(train_loader, encoder, decoder, criterion, encoder_optimizer, decoder_
 
     start = time.time()
 
+    references = list()  # references (true captions) for calculating metrics
+    hypotheses = list()  # hypotheses (predictions)
+
     # Batches
-    for i, (imgs, caps, caplens) in enumerate(train_loader):
+    for i, (imgs, caps, caplens, allcaps) in enumerate(train_loader):
         data_time.update(time.time() - start)
 
         # Move to GPU, if available
@@ -203,18 +218,19 @@ def train(train_loader, encoder, decoder, criterion, encoder_optimizer, decoder_
 
         # Forward prop.
         imgs = encoder(imgs)
-        scores, caps_sorted, decode_lengths, alphas, sort_ind = decoder(imgs, caps, caplens)
+        scores, decode_lengths, alphas, sort_ind = decoder(imgs, word_map["<start>"], caplens)
+        caps_sorted = caps[sort_ind]
 
         # Since we decoded starting with <start>, the targets are all words after <start>, up to <end>
         targets = caps_sorted[:, 1:]
 
         # Remove timesteps that we didn't decode at, or are pads
         # pack_padded_sequence is an easy trick to do this
-        scores, _ = pack_padded_sequence(scores, decode_lengths, batch_first=True)
-        targets, _ = pack_padded_sequence(targets, decode_lengths, batch_first=True)
+        packed_scores, _ = pack_padded_sequence(scores, decode_lengths, batch_first=True)
+        packed_targets, _ = pack_padded_sequence(targets, decode_lengths, batch_first=True)
 
         # Calculate loss
-        loss = criterion(scores, targets)
+        loss = criterion(packed_scores, packed_targets)
 
         # Add doubly stochastic attention regularization
         loss += alpha_c * ((1. - alphas.sum(dim=1)) ** 2).mean()
@@ -236,10 +252,29 @@ def train(train_loader, encoder, decoder, criterion, encoder_optimizer, decoder_
         if encoder_optimizer is not None:
             encoder_optimizer.step()
 
+        # Hypotheses
+        _, preds = torch.max(scores, dim=2)
+        preds = preds.tolist()
+        temp_preds = list()
+        for j, p in enumerate(preds):
+            temp_preds.append(preds[j][:decode_lengths[j]])  # remove pads
+        preds = temp_preds
+        hypotheses.extend(preds)
+
+        # References
+        allcaps = allcaps[sort_ind]  # because images were sorted in the decoder
+        for j in range(allcaps.shape[0]):
+            img_caps = allcaps[j].tolist()
+            img_captions = list(
+                map(lambda c: [w for w in c if
+                               w not in {word_map['<start>'], word_map['<pad>']}],
+                    img_caps))  # remove <start> and pads
+            references.append(img_captions)
+
         # Keep track of metrics
-        topk = accuracy(scores, targets, TOP_K_ACCURACY)
+        match = [ref[0] == hyp for ref, hyp in zip(references, hypotheses)]
         losses.update(loss.item(), sum(decode_lengths))
-        topk_accs.update(topk, sum(decode_lengths))
+        topk_accs.update(sum(match) / len(match), len(match))
         batch_time.update(time.time() - start)
 
         start = time.time()
@@ -252,13 +287,13 @@ def train(train_loader, encoder, decoder, criterion, encoder_optimizer, decoder_
                   'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
                   'Error {error_val:.5f} ({error_avg:.5f})'.format(
                   epoch, i, len(train_loader), batch_time=batch_time, data_time=data_time,
-                  loss=losses, error_val=1-topk_accs.val/100, error_avg=1-topk_accs.avg/100))
+                  loss=losses, error_val=1-topk_accs.val, error_avg=1-topk_accs.avg))
 
     train_loader.dataset.increment_chunk()
 
     return {
         "losses": losses.avg,
-        "error": 1 - topk_accs.avg/100,
+        "error": 1 - topk_accs.avg,
     }
 
 
@@ -299,27 +334,46 @@ def validate(val_loader, encoder, decoder, criterion, print_freq=None):
             # Forward prop.
             if encoder is not None:
                 imgs = encoder(imgs)
-            scores, caps_sorted, decode_lengths, alphas, sort_ind = decoder(imgs, caps, caplens)
+            scores, decode_lengths, alphas, sort_ind = decoder(imgs, word_map["<start>"], caplens)
+            caps_sorted = caps[sort_ind]
 
             # Since we decoded starting with <start>, the targets are all words after <start>, up to <end>
             targets = caps_sorted[:, 1:]
 
             # Remove timesteps that we didn't decode at, or are pads
             # pack_padded_sequence is an easy trick to do this
-            scores_copy = scores.clone()
-            scores, _ = pack_padded_sequence(scores, decode_lengths, batch_first=True)
-            targets, _ = pack_padded_sequence(targets, decode_lengths, batch_first=True)
+            packed_scores, _ = pack_padded_sequence(scores, decode_lengths, batch_first=True)
+            packed_targets, _ = pack_padded_sequence(targets, decode_lengths, batch_first=True)
 
             # Calculate loss
-            loss = criterion(scores, targets)
+            loss = criterion(packed_scores, packed_targets)
 
             # Add doubly stochastic attention regularization
             loss += alpha_c * ((1. - alphas.sum(dim=1)) ** 2).mean()
 
+            # Hypotheses
+            _, preds = torch.max(scores, dim=2)
+            preds = preds.tolist()
+            temp_preds = list()
+            for j, p in enumerate(preds):
+                temp_preds.append(preds[j][:decode_lengths[j]])  # remove pads
+            preds = temp_preds
+            hypotheses.extend(preds)
+
+            # References
+            allcaps = allcaps[sort_ind]  # because images were sorted in the decoder
+            for j in range(allcaps.shape[0]):
+                img_caps = allcaps[j].tolist()
+                img_captions = list(
+                    map(lambda c: [w for w in c if
+                                   w not in {word_map['<start>'], word_map['<pad>']}],
+                        img_caps))  # remove <start> and pads
+                references.append(img_captions)
+
             # Keep track of metrics
+            match = [ref[0] == hyp for ref, hyp in zip(references, hypotheses)]
             losses.update(loss.item(), sum(decode_lengths))
-            topk = accuracy(scores, targets, TOP_K_ACCURACY)
-            topkaccs.update(topk, sum(decode_lengths))
+            topkaccs.update(sum(match)/len(match), len(match))
             batch_time.update(time.time() - start)
 
             start = time.time()
@@ -337,24 +391,6 @@ def validate(val_loader, encoder, decoder, criterion, print_freq=None):
             # If for n images, we have n hypotheses, and references a, b, c... for each image, we need -
             # references = [[ref1a, ref1b, ref1c], [ref2a, ref2b], ...], hypotheses = [hyp1, hyp2, ...]
 
-            # References
-            allcaps = allcaps[sort_ind]  # because images were sorted in the decoder
-            for j in range(allcaps.shape[0]):
-                img_caps = allcaps[j].tolist()
-                img_captions = list(
-                    map(lambda c: [w for w in c if w not in {word_map['<start>'], word_map['<pad>']}],
-                        img_caps))  # remove <start> and pads
-                references.append(img_captions)
-
-            # Hypotheses
-            _, preds = torch.max(scores_copy, dim=2)
-            preds = preds.tolist()
-            temp_preds = list()
-            for j, p in enumerate(preds):
-                temp_preds.append(preds[j][:decode_lengths[j]])  # remove pads
-            preds = temp_preds
-            hypotheses.extend(preds)
-
             assert len(references) == len(hypotheses)
 
     # Calculate metrics
@@ -364,13 +400,13 @@ def validate(val_loader, encoder, decoder, criterion, print_freq=None):
         '\n * LOSS - {loss.avg:.5f}, ERROR - {error:.5f}, '
         'norm edit distance - {edit_distance:.5f}\n'.format(
             loss=losses,
-            error=1-topkaccs.avg/100,
+            error=1-topkaccs.avg,
             edit_distance=metrics["norm_edit"],
         ))
 
     metrics.update({
         "losses": losses.avg,
-        "error": 1 - topkaccs.avg/100,
+        "error": 1 - topkaccs.avg,
     })
 
     return metrics
