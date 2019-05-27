@@ -22,7 +22,7 @@ def create_dataset_json_description(input_dir_train, input_dir_test, input_dir_e
     images = []
 
     labels = defaultdict(list)
-    for input_dir in (input_dir_train, input_dir_test, input_dir_extra):
+    for input_dir in (input_dir_train, input_dir_test):
         bbox_data = pandas.read_csv(list(input_dir.glob("*.csv"))[0], index_col=0)
         for index, row in bbox_data.iterrows():
             label = row["label"]
