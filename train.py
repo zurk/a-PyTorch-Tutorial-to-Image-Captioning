@@ -30,7 +30,7 @@ data_name = 'svhn_1_cap_per_img_1_min_word_freq'  # base name shared by data fil
 # Model parameters
 emb_dim = 512  # dimension of word embeddings
 attention_dim = 512  # dimension of attention linear layers
-decoder_dim = 256  # dimension of decoder RNN
+decoder_dim = 512  # dimension of decoder RNN
 encoder_dim = 512  # dimension of encoder network. 512 for ResNet-18 and 2048 for ResNet-101
 dropout = 0.5
 device = "cuda"  # "cpu"  # sets device for model and PyTorch tensors

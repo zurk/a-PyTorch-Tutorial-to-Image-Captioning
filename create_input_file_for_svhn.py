@@ -29,20 +29,23 @@ def create_dataset_json_description(input_dir_train, input_dir_test, input_dir_e
             label = 0 if label == 10 else label
             labels[index].append((row["xmin"], str(label)))
 
-    train_indexes, _ = train_test_split(range(len(labels)), test_size=0.05, random_state=1994)
-    train_indexes = sorted(train_indexes)
-    train_val_index = 0
+    train, test = train_test_split(range(len(labels)), test_size=0.391, random_state=1994)
+    train, _ = train_test_split(train, test_size=0.05, random_state=1994)
+    train = sorted(train)
+    test = sorted(test)
+    index = 0
     train_index = 0
+    test_index = 0
     for key in labels:
-        if "test" in key:
+        if index == train[train_index]:
+            train_index += 1
+            split = "train"
+        elif index == test[test_index]:
             split = "test"
+            test_index += 1
         else:
-            if train_val_index == train_indexes[train_index]:
-                train_index += 1
-                split = "train"
-            else:
-                split = "val"
-            train_val_index += 1
+            split = "val"
+        index += 1
         image = {
             "filename": os.path.split(key)[-1],
             "filepath": os.path.split(os.path.split(key)[0])[1],
